@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Título actualizado a Ruleta Aleatoria -->
+    <title>Ruleta Aleatoria</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #canvas-container {
+            position: relative;
+            width: clamp(300px, 80vw, 500px);
+            height: clamp(300px, 80vw, 500px);
+            margin: 0 auto;
+            filter: drop-shadow(0 25px 25px rgba(0, 0, 0, 0.5));
+        }
+        #wheel-canvas {
+            width: 100%;
+            height: 100%;
+            /* Transición ajustada a 8 segundos para soportar los 10 giros con fluidez */
+            transition: transform 8s cubic-bezier(0.1, 0, 0.1, 1);
+        }
+        .pointer {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 18px solid transparent;
+            border-right: 18px solid transparent;
+            border-top: 36px solid #f8fafc;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+            z-index: 20;
+        }
+        /* Efecto de brillo para el ganador */
+        .winner-glow {
+            animation: glow 1.5s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { text-shadow: 0 0 10px #fff, 0 0 20px #818cf8; }
+            to { text-shadow: 0 0 20px #fff, 0 0 40px #6366f1; }
+        }
+    </style>
+</head>
+<body class="bg-[#05050a] text-slate-200 font-sans min-h-screen p-4 md:p-12 selection:bg-indigo-500/30">
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        
+        <!-- Lado Izquierdo: Configuración (4 columnas) -->
+        <div class="lg:col-span-4 bg-slate-900/40 backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border border-white/5 relative overflow-hidden ring-1 ring-white/10">
+            <h1 class="text-2xl font-semibold mb-8 tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                Panel de Sorteo
+            </h1>
+            
+            <div class="mb-8">
+                <label class="block text-[10px] font-bold mb-3 text-slate-500 uppercase tracking-[0.2em]">Lista de Nombres</label>
+                <textarea id="names-list" rows="6" class="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 outline-none transition-all placeholder:text-slate-700 resize-none" spellcheck="false">GATO
+GABRIEL
+PIERCE
+TIMMI
+SOY MARACO
+JOSELUIS</textarea>
+            </div>
+
+            <!-- Botón camuflado para activar el truco -->
+            <div class="mb-8">
+                <button id="ui-helper-btn" class="text-[10px] text-slate-600 hover:text-slate-400 uppercase tracking-widest transition-colors flex items-center gap-2 mb-2 group">
+                    <span class="w-1.5 h-1.5 rounded-full bg-slate-800 group-hover:bg-slate-600"></span>
+                    Ayuda de Interfaz
+                </button>
+                <div id="secret-panel" class="hidden animate-in fade-in zoom-in-95 duration-300">
+                    <div class="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/20">
+                        <input type="text" id="target-winner" value="PIERCE" placeholder="Escribir ganador oculto..." class="w-full bg-transparent border-b border-indigo-500/30 py-2 text-sm focus:border-indigo-500 outline-none transition-all text-indigo-300 placeholder:text-indigo-900/50">
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <button onclick="updateWheel()" class="w-full py-4 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-all">
+                    Refrescar Lista
+                </button>
+                
+                <button id="spin-btn" onclick="spinWheel()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 rounded-2xl text-lg shadow-[0_0_40px_-10px_rgba(79,70,229,0.5)] transition-all active:scale-[0.97] flex items-center justify-center gap-3">
+                    LANZAR SORTEO
+                </button>
+            </div>
+        </div>
+
+        <!-- Lado Derecho: La Ruleta (8 columnas) -->
+        <div class="lg:col-span-8 flex flex-col items-center justify-center">
+            <div id="canvas-container" class="relative">
+                <div class="pointer"></div>
+                <!-- Círculo central decorativo -->
+                <div class="absolute inset-0 m-auto w-12 h-12 bg-slate-900 rounded-full border-4 border-slate-800 shadow-2xl z-30 flex items-center justify-center">
+                    <div class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
+                </div>
+                <canvas id="wheel-canvas" width="1000" height="1000"></canvas>
+            </div>
+            
+            <div id="result-display" class="mt-16 text-center min-h-[80px]">
+                <div id="winner-container" class="transition-all duration-700 opacity-0 transform translate-y-4">
+                    <p class="text-slate-500 text-sm uppercase tracking-[0.3em] mb-2">Resultado Final</p>
+                    <h2 class="text-5xl md:text-6xl font-black text-white" id="winner-text"></h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('wheel-canvas');
+        const ctx = canvas.getContext('2d');
+        const namesInput = document.getElementById('names-list');
+        const targetWinnerInput = document.getElementById('target-winner');
+        const winnerText = document.getElementById('winner-text');
+        const winnerContainer = document.getElementById('winner-container');
+        const secretPanel = document.getElementById('secret-panel');
+        const helperBtn = document.getElementById('ui-helper-btn');
+        
+        let clickCount = 0;
+        helperBtn.addEventListener('click', () => {
+            clickCount++;
+            if (clickCount >= 3) {
+                secretPanel.classList.toggle('hidden');
+                clickCount = 0;
+                console.log("[v0] Panel secreto activado vía botón de ayuda");
+            }
+        });
+
+        function getColors(count) {
+            // Paleta Premium: Tonos profundos de azul, pizarra y acentos índigo
+            const palette = ['#0f172a', '#1e293b', '#334155', '#1e1b4b', '#312e81', '#4338ca'];
+            return Array.from({ length: count }, (_, i) => palette[i % palette.length]);
+        }
+
+        let segments = [];
+        let currentRotation = 0;
+        let isSpinning = false;
+        let totalRotationDeg = 0;
+
+        function drawWheel() {
+            const names = namesInput.value.split('\n').filter(n => n.trim() !== '');
+            if (names.length === 0) return;
+            
+            segments = names;
+            const size = canvas.width;
+            const center = size / 2;
+            const radius = center - 40;
+            const arcSize = (2 * Math.PI) / segments.length;
+            const colors = getColors(segments.length);
+
+            ctx.clearRect(0, 0, size, size);
+
+            segments.forEach((name, i) => {
+                const angle = i * arcSize;
+                
+                // Segmento con borde sutil
+                ctx.beginPath();
+                ctx.fillStyle = colors[i];
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.lineWidth = 2;
+                ctx.moveTo(center, center);
+                ctx.arc(center, center, radius, angle, angle + arcSize);
+                ctx.lineTo(center, center);
+                ctx.fill();
+                ctx.stroke();
+
+                // Texto con mejor tipografía
+                ctx.save();
+                ctx.translate(center, center);
+                ctx.rotate(angle + arcSize / 2);
+                ctx.textAlign = "right";
+                ctx.fillStyle = i % 2 === 0 ? "#f8fafc" : "#94a3b8";
+                ctx.font = "600 32px sans-serif";
+                ctx.fillText(name.toUpperCase(), radius - 60, 12);
+                ctx.restore();
+            });
+
+            // Borde exterior decorativo
+            ctx.beginPath();
+            ctx.arc(center, center, radius + 10, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+        }
+
+        function updateWheel() {
+            if (isSpinning) return;
+            drawWheel();
+            winnerContainer.classList.add('opacity-0', 'translate-y-4');
+        }
+
+        function spinWheel() {
+            if (isSpinning || segments.length === 0) return;
+            
+            isSpinning = true;
+            winnerContainer.classList.add('opacity-0', 'translate-y-4');
+            winnerText.classList.remove('winner-glow');
+            
+            const targetName = targetWinnerInput.value.trim().toLowerCase();
+            let targetIndex = segments.findIndex(s => s.trim().toLowerCase() === targetName);
+            
+            if (targetIndex === -1) {
+                targetIndex = Math.floor(Math.random() * segments.length);
+            }
+
+            const arcSize = (2 * Math.PI) / segments.length;
+            const fixedSpins = 10; 
+            const segmentCenter = (targetIndex * arcSize) + (arcSize / 2);
+            
+            // Calculamos la posición actual dentro del círculo para saber cuánto falta para llegar al objetivo
+            const currentRotationMod = totalRotationDeg % 360;
+            const targetRotationDeg = (1.5 * Math.PI - segmentCenter) * (180 / Math.PI);
+            
+            // Calculamos cuántos grados necesitamos para llegar al objetivo considerando las 10 vueltas extra
+            let degreesToMove = (targetRotationDeg - currentRotationMod + 360) % 360;
+            if (degreesToMove < 360) degreesToMove += (fixedSpins * 360);
+            
+            totalRotationDeg += degreesToMove;
+            canvas.style.transform = `rotate(${totalRotationDeg}deg)`;
+
+            setTimeout(() => {
+                isSpinning = false;
+                winnerText.innerText = segments[targetIndex];
+                winnerText.classList.add('winner-glow');
+                winnerContainer.classList.remove('opacity-0', 'translate-y-4');
+            }, 8200); // Timeout sincronizado con la transición de 8s
+        }
+
+        drawWheel();
+    </script>
+</body>
+</html>
